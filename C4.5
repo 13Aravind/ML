@@ -1,0 +1,103 @@
+import pandas as pd
+import numpy as np
+from collections import Counter
+
+data = pd.DataFrame({
+ "Outlook":["Sunny","Sunny","Overcast","Rain","Rain","Rain","Overcast","Sunny","Sunny","Rain","Sunny","Overcast","Overcast","Rain"],
+ "Temperature":["Hot","Hot","Hot","Mild","Cool","Cool","Cool","Mild","Cool","Mild","Mild","Mild","Hot","Mild"],
+ "Humidity":["High","High","High","High","Normal","Normal","Normal","High","Normal","Normal","Normal","High","Normal","High"],
+ "Wind":["Weak","Strong","Weak","Weak","Weak","Strong","Strong","Weak","Weak","Weak","Strong","Strong","Weak","Strong"],
+ "Play":["No","No","Yes","Yes","Yes","No","Yes","No","Yes","Yes","Yes","Yes","Yes","No"]
+})
+
+for col in data.columns:
+ if data[col].dtype == 'object':
+  data[col] = data[col].astype('category').cat.codes
+
+feature_names = list(data.drop(columns=["Play"]).columns)
+
+X = data.drop(columns=["Play"]).values
+y = data["Play"].values
+
+def entropy(y):
+ values, counts = np.unique(y, return_counts=True)
+ probs = counts / len(y)
+ return -np.sum(probs * np.log2(probs + 1e-9))
+
+class C45:
+ def fit(self, X, y, feature_names):
+  self.feature_names = feature_names
+  self.tree = self._build_tree(X, y)
+
+ def _best_split(self, X_column, y):
+  thresholds = np.unique(X_column)
+  best_gain_ratio = -1
+  best_threshold = None
+  for threshold in thresholds:
+   left_mask = X_column <= threshold
+   right_mask = X_column > threshold
+   if sum(left_mask) == 0 or sum(right_mask) == 0:
+    continue
+   left_y = y[left_mask]
+   right_y = y[right_mask]
+   total_entropy = entropy(y)
+   weighted_entropy = (
+    len(left_y)/len(y) * entropy(left_y) +
+    len(right_y)/len(y) * entropy(right_y)
+   )
+   info_gain = total_entropy - weighted_entropy
+   p_left = len(left_y)/len(y)
+   p_right = len(right_y)/len(y)
+   split_info = - (
+    p_left*np.log2(p_left+1e-9) +
+    p_right*np.log2(p_right+1e-9)
+   )
+   if split_info == 0:
+    continue
+   gain_ratio = info_gain / split_info
+   if gain_ratio > best_gain_ratio:
+    best_gain_ratio = gain_ratio
+    best_threshold = threshold
+  return best_threshold, best_gain_ratio
+
+ def _build_tree(self, X, y):
+  if len(np.unique(y)) == 1:
+   return y[0]
+  if len(y) == 0:
+   return None
+  best_feature = None
+  best_score = -1
+  best_threshold = None
+  for i in range(X.shape[1]):
+   threshold, score = self._best_split(X[:, i], y)
+   if score > best_score:
+    best_feature = i
+    best_score = score
+    best_threshold = threshold
+  if best_feature is None:
+   return Counter(y).most_common(1)[0][0]
+  left_mask = X[:, best_feature] <= best_threshold
+  right_mask = X[:, best_feature] > best_threshold
+  return {
+   (self.feature_names[best_feature], best_threshold): {
+    "left": self._build_tree(X[left_mask], y[left_mask]),
+    "right": self._build_tree(X[right_mask], y[right_mask])
+   }
+  }
+
+ def print_tree(self, tree=None, indent=""):
+  if tree is None:
+   tree = self.tree
+  if not isinstance(tree, dict):
+   print(indent + "→ Class:", tree)
+   return
+  for (feature, threshold), branches in tree.items():
+   print(f"{indent}{feature} <= {threshold}")
+   print(f"{indent}├── True:")
+   self.print_tree(branches["left"], indent + "│ ")
+   print(f"{indent}└── False:")
+   self.print_tree(branches["right"], indent + " ")
+
+model = C45()
+model.fit(X, y, feature_names)
+model.print_tree()
